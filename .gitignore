@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+webhook.json
+state.json
+state-incoming.json
+queue.jsonl
+incoming.jsonl
+handled.txt
+errors.log
+tunnel-url.txt
