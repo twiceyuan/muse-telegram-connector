@@ -2,7 +2,7 @@
 
 - `custom.telegram-bot` connects Muse to the Telegram Bot API at `api.telegram.org`. It authenticates with the registered `api_key` credential, which is the bot token you created with BotFather for your own bot.
 
-- Helpers live in `~/workspace/custom-connectors/custom.telegram-bot/bin/`. The helper `tg.py` offers get-me, get-updates, send-message, get-chat, set-webhook, get-webhook-info and delete-webhook.
+- Helpers live in `~/workspace/custom-connectors/custom.telegram-bot/bin/`. The helper `tg.py` offers get-me, get-updates, send-message, send-photo, get-chat, set-webhook, get-webhook-info and delete-webhook. `send-message` sends a typing chat action just before the message by default (use `--no-typing` to skip it); `send-photo --chat-id <id> --photo <file> [--caption ...]` sends an upload_photo chat action first, then uploads the local file.
 
 ## Connect
 

@@ -11,8 +11,10 @@ percent-encoded. Never print request URLs (they carry the surrogate).
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
+import uuid
 
 sys.path.insert(0, "/opt/muse/skills/custom-connector-setup/bin")
 from dynamic_credentials import dynamic_credential_entry, read_json_response
@@ -45,6 +47,59 @@ def call(method: str, params: dict, http_timeout: float = 40.0) -> dict:
             return {"ok": False, "error_code": exc.code, "description": str(exc)}
 
 
+def call_multipart(method: str, fields: dict, file_param: str,
+                   file_path: str, http_timeout: float = 60.0) -> dict:
+    """POST a multipart/form-data request (e.g. sendPhoto with a local file).
+
+    Same URL/surrogate handling as call(); the file is read from disk and
+    never logged.
+    """
+    import mimetypes
+    import os
+    surrogate = str(dynamic_credential_entry(CREDENTIAL)["surrogate"]).strip()
+    url = "https://api.telegram.org/bot" + surrogate + "/" + method
+    boundary = "----muse-" + uuid.uuid4().hex
+    body = b""
+    for key, value in fields.items():
+        if value is None:
+            continue
+        body += ("--" + boundary + "\r\n").encode()
+        body += ('Content-Disposition: form-data; name="%s"\r\n\r\n' % key).encode()
+        body += str(value).encode("utf-8") + b"\r\n"
+    filename = os.path.basename(file_path)
+    ctype = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    with open(file_path, "rb") as fh:
+        data = fh.read()
+    body += ("--" + boundary + "\r\n").encode()
+    body += ('Content-Disposition: form-data; name="%s"; filename="%s"\r\n'
+             % (file_param, filename)).encode()
+    body += ("Content-Type: %s\r\n\r\n" % ctype).encode()
+    body += data + b"\r\n"
+    body += ("--" + boundary + "--\r\n").encode()
+    request = urllib.request.Request(url, data=body, method="POST")
+    request.add_header("Content-Type",
+                       "multipart/form-data; boundary=" + boundary)
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(
+            request, timeout=http_timeout
+        ) as response:
+            return read_json_response(response)
+    except urllib.error.HTTPError as exc:
+        try:
+            return read_json_response(exc)
+        except Exception:
+            return {"ok": False, "error_code": exc.code, "description": str(exc)}
+
+
+def send_chat_action(chat_id, action: str) -> dict:
+    """Best-effort chat action (typing, upload_photo, ...); never raises."""
+    try:
+        return call("sendChatAction",
+                    {"chat_id": chat_id, "action": action})
+    except Exception:
+        return {"ok": False}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Telegram Bot API helper")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -61,6 +116,23 @@ def main() -> int:
     p_send.add_argument("--text", required=True)
     p_send.add_argument("--reply-to", type=int, default=None)
     p_send.add_argument("--thread-id", type=int, default=None)
+    p_send.add_argument("--typing", dest="typing", action="store_true",
+                        default=True,
+                        help="send a typing chat action just before the "
+                             "message (default on)")
+    p_send.add_argument("--no-typing", dest="typing", action="store_false",
+                        help="skip the typing chat action")
+
+    p_photo = sub.add_parser("send-photo")
+    p_photo.add_argument("--chat-id", required=True)
+    p_photo.add_argument("--photo", required=True,
+                         help="local image file to upload")
+    p_photo.add_argument("--caption", default=None)
+    p_photo.add_argument("--reply-to", type=int, default=None)
+    p_photo.add_argument("--thread-id", type=int, default=None)
+    p_photo.add_argument("--no-upload-action", dest="upload_action",
+                         action="store_false", default=True,
+                         help="skip the upload_photo chat action first")
 
     p_chat = sub.add_parser("get-chat")
     p_chat.add_argument("--chat-id", required=True)
@@ -85,12 +157,32 @@ def main() -> int:
             params["offset"] = args.offset
         result = call("getUpdates", params, http_timeout=args.timeout + 30)
     elif args.cmd == "send-message":
+        if args.typing:
+            # Typing shows for ~5s; pause so it is actually visible
+            # before the message lands (was ~1s, too easy to miss).
+            res = send_chat_action(args.chat_id, "typing")
+            if res.get("ok"):
+                time.sleep(3)
         params = {"chat_id": args.chat_id, "text": args.text}
         if args.reply_to is not None:
             params["reply_parameters"] = {"message_id": args.reply_to}
         if args.thread_id is not None:
             params["message_thread_id"] = args.thread_id
         result = call("sendMessage", params)
+    elif args.cmd == "send-photo":
+        if args.upload_action:
+            # Shows "sending a photo..." while the file uploads, so the
+            # user sees activity instead of silence.
+            send_chat_action(args.chat_id, "upload_photo")
+        fields = {"chat_id": args.chat_id}
+        if args.caption is not None:
+            fields["caption"] = args.caption
+        if args.reply_to is not None:
+            fields["reply_parameters"] = json.dumps(
+                {"message_id": args.reply_to}, ensure_ascii=False)
+        if args.thread_id is not None:
+            fields["message_thread_id"] = args.thread_id
+        result = call_multipart("sendPhoto", fields, "photo", args.photo)
     elif args.cmd == "get-chat":
         result = call("getChat", {"chat_id": args.chat_id})
     elif args.cmd == "set-webhook":
