@@ -10,6 +10,7 @@ percent-encoded. Never print request URLs (they carry the surrogate).
 """
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -29,6 +30,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def call(method: str, params: dict, http_timeout: float = 40.0) -> dict:
+    # Build the URL with the RAW surrogate in the path. Do not use
+    # url_with_surrogate_path_segment here: it percent-encodes the
+    # surrogate's colon, the egress swap then cannot find the surrogate,
+    # and Telegram answers 404. Raw "hsurr:..." in the path works; the
+    # swap replaces it with the real token on the way out.
     surrogate = str(dynamic_credential_entry(CREDENTIAL)["surrogate"]).strip()
     url = "https://api.telegram.org/bot" + surrogate + "/" + method
     body = json.dumps(params).encode("utf-8")
@@ -55,7 +61,6 @@ def call_multipart(method: str, fields: dict, file_param: str,
     never logged.
     """
     import mimetypes
-    import os
     surrogate = str(dynamic_credential_entry(CREDENTIAL)["surrogate"]).strip()
     url = "https://api.telegram.org/bot" + surrogate + "/" + method
     boundary = "----muse-" + uuid.uuid4().hex
@@ -150,8 +155,12 @@ def main() -> int:
 
     p_wh = sub.add_parser("set-webhook")
     p_wh.add_argument("--url-file", required=True,
-                      help="file holding the webhook base URL, no trailing slash")
-    p_wh.add_argument("--webhook-config", required=True,
+                      help="file holding the tunnel base URL, no trailing slash")
+    p_wh.add_argument("--webhook-config",
+                      default=os.environ.get(
+                          "TG_WEBHOOK_CONFIG",
+                          os.path.expanduser(
+                              "~/workspace/telegram-relay/webhook.json")),
                       help="JSON file with path and secret for the receiver")
 
     sub.add_parser("get-webhook-info")

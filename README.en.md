@@ -53,8 +53,8 @@ After this you can add the bot to a group, or DM it to leave messages for your M
 
 If you want Muse to actively watch group messages (for example, to coordinate with another agent in the same group), have it do three more things:
 
-1. Copy both `examples/fetch.py` and `examples/typing_keeper.py` into `~/workspace/telegram-relay/`, replacing the `BOT_USERNAME` and `BOT_ID` placeholders in fetch.py with the real values from Step 4's get-me output. fetch.py reacts 👀 to each relevant message the moment it is pulled (a read receipt) and, when a reply is plausible, starts typing_keeper.py to keep a "typing..." indicator alive until the message is marked handled.
-2. Create a scheduled task (every 5 minutes is a good default) using the contents of `examples/watch-task.md` as the task instructions, with its placeholders replaced.
+1. Copy `examples/fetch.py`, `examples/watch.py`, and `examples/typing_keeper.py` into `~/workspace/telegram-relay/`, then create a `local.json` in that directory with the bot identity from Step 4's get-me output (`{"bot_username": ..., "bot_id": ..., "bot_name_keywords": [...]}`). That file stays on your machine and never enters the repo. fetch.py / watch.py react 👀 to each relevant message the moment it is pulled (a read receipt) and, when a reply is plausible, start typing_keeper.py to keep a "typing..." indicator alive until the message is marked handled; watch.py long-polls in 600-second slices.
+2. Create a scheduled task (every 10 minutes) using the contents of `examples/watch-task.md` as the task instructions, with its placeholders replaced. The template uses a supervisor-plus-short-watcher pattern: each run first checks the watcher heartbeat and exits at once when healthy; a watcher serves a term of about 60 minutes, handing over seamlessly by queueing on a file lock with watch.py's `--wait-lock`.
 3. The behavioral rules (when to speak, how many rounds of disagreement, when to escalate to you) live in that template; adjust them to taste.
 
 ## What it does
@@ -72,13 +72,14 @@ connector/
   bin/tg.py             Bot API command-line helper
 examples/
   fetch.py              getUpdates queue script (offset watermark + relevance pre-filter + 👀 read reactions)
+  watch.py              Long-poll watch slice (600s slices, file lock + --wait-lock seamless handover)
   typing_keeper.py      Tiny keeper that holds a "typing..." indicator until a message is handled
-  watch-task.md         Instruction template for the message-watch scheduled task
+  watch-task.md         Instruction template for the message-watch scheduled task (supervisor + short watcher)
 ```
 
 ## Known limitations
 
-- Listening is polling-based, and fetching can only happen inside Muse agent turns (hooks and background system services cannot access connector credentials in the Muse runtime). Bot reactions are therefore minutes late, never instant.
+- Listening is long-poll based, and pulling itself lands within seconds — but pulling and replying can only happen inside Muse agent turns (hooks and background system services cannot access connector credentials in the Muse runtime). Bot replies are therefore minutes late, never instant.
 - The webhook commands are included, but they need a public HTTPS endpoint that Telegram can reach, and something still has to wake the agent after delivery. Whether that trade is worth it depends on your setup.
 - A bot only sees chats it has joined. Telegram keeps unconfirmed updates for about 24 hours, so a watch that is down longer than that will miss messages.
 

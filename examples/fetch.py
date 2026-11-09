@@ -18,9 +18,15 @@ Relevant means: any update in a group/supergroup chat, any private
 message to the bot, any my_chat_member change (bot added/removed),
 any message from another bot, and anything mentioning the bot.
 
-Setup: fill in BOT_USERNAME and BOT_ID from `tg.py get-me`, and point
-TG_CONNECTOR_BIN at the folder holding tg.py if you placed it
-somewhere else.
+Setup: tell the scripts who your bot is in a local.json file placed
+in the relay directory (TG_RELAY_DIR, where queue.jsonl lives), e.g.
+{"bot_username": "your_bot_username", "bot_id": 123456789,
+"bot_name_keywords": ["your", "bot", "nicknames"]}, with the values
+from `tg.py get-me`. That file is local-only and never committed; the
+same keys can also come from TG_BOT_USERNAME / TG_BOT_ID /
+TG_BOT_NAME_KEYWORDS (comma-separated) environment variables, which
+take precedence. Point TG_CONNECTOR_BIN at the folder holding tg.py
+if you placed it somewhere else.
 """
 import json
 import os
@@ -38,15 +44,47 @@ BASE = os.environ.get(
 STATE = os.path.join(BASE, "state.json")
 QUEUE = os.path.join(BASE, "queue.jsonl")
 
-# Fill these in from `tg.py get-me`.
-BOT_USERNAME = "your_bot_username"
-BOT_ID = 0
+
+def load_local_config() -> dict:
+    """Bot identity for this deployment; never committed to the repo.
+
+    Precedence: TG_BOT_USERNAME / TG_BOT_ID / TG_BOT_NAME_KEYWORDS
+    environment variables, then local.json in the relay directory,
+    then local.json next to this script. Missing values fall back to
+    the placeholders below, which match nothing.
+    """
+    cfg = {}
+    for path in (os.path.join(BASE, "local.json"),
+                 os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "local.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                cfg.update(json.load(fh))
+        except Exception:
+            pass
+    if os.environ.get("TG_BOT_USERNAME"):
+        cfg["bot_username"] = os.environ["TG_BOT_USERNAME"]
+    if os.environ.get("TG_BOT_ID"):
+        try:
+            cfg["bot_id"] = int(os.environ["TG_BOT_ID"])
+        except ValueError:
+            pass
+    if os.environ.get("TG_BOT_NAME_KEYWORDS"):
+        cfg["bot_name_keywords"] = [
+            w.strip() for w in
+            os.environ["TG_BOT_NAME_KEYWORDS"].split(",") if w.strip()]
+    return cfg
+
+
+_CONFIG = load_local_config()
+BOT_USERNAME = _CONFIG.get("bot_username", "your_bot_username")
+BOT_ID = int(_CONFIG.get("bot_id", 0) or 0)
 
 # Optional: words that count as naming the bot in group text (its
 # display name, for example). A group message from another bot that
 # mentions the bot by @username or by one of these words also gets the
 # typing indicator.
-BOT_NAME_KEYWORDS = ()
+BOT_NAME_KEYWORDS = tuple(_CONFIG.get("bot_name_keywords", ()))
 
 
 def load_offset() -> int:

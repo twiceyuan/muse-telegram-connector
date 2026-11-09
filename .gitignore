@@ -8,3 +8,4 @@ incoming.jsonl
 handled.txt
 errors.log
 tunnel-url.txt
+local.json
