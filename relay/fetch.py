@@ -18,15 +18,25 @@ Relevant means: any update in a group/supergroup chat, any private
 message to the bot, any my_chat_member change (bot added/removed),
 any message from another bot, and anything mentioning the bot.
 
+Private chats can optionally be restricted to the owner: set
+"owner_ids" in local.json (or TG_OWNER_IDS) to the Telegram user
+id(s) allowed to talk to the bot privately. Private messages from
+anyone else are then dropped silently — no 👀 reaction, no typing
+indicator, no queue entry; they are appended to dropped.log in the
+relay directory instead, so the owner can review them later. When
+owner_ids is not configured, every private message counts as
+relevant (the original behaviour). Group chats are unaffected.
+
 Setup: tell the scripts who your bot is in a local.json file placed
 in the relay directory (TG_RELAY_DIR, where queue.jsonl lives), e.g.
 {"bot_username": "your_bot_username", "bot_id": 123456789,
-"bot_name_keywords": ["your", "bot", "nicknames"]}, with the values
-from `tg.py get-me`. That file is local-only and never committed; the
-same keys can also come from TG_BOT_USERNAME / TG_BOT_ID /
-TG_BOT_NAME_KEYWORDS (comma-separated) environment variables, which
-take precedence. Point TG_CONNECTOR_BIN at the folder holding tg.py
-if you placed it somewhere else.
+"bot_name_keywords": ["your", "bot", "nicknames"],
+"owner_ids": [123456789]}, with the values from `tg.py get-me`.
+That file is local-only and never committed; the same keys can also
+come from TG_BOT_USERNAME / TG_BOT_ID / TG_BOT_NAME_KEYWORDS /
+TG_OWNER_IDS (comma-separated) environment variables, which take
+precedence. Point TG_CONNECTOR_BIN at the folder holding tg.py if
+you placed it somewhere else.
 """
 import json
 import os
@@ -43,6 +53,7 @@ BASE = os.environ.get(
     "TG_RELAY_DIR", os.path.expanduser("~/workspace/telegram-relay"))
 STATE = os.path.join(BASE, "state.json")
 QUEUE = os.path.join(BASE, "queue.jsonl")
+DROPPED = os.path.join(BASE, "dropped.log")
 
 
 def load_local_config() -> dict:
@@ -73,6 +84,15 @@ def load_local_config() -> dict:
         cfg["bot_name_keywords"] = [
             w.strip() for w in
             os.environ["TG_BOT_NAME_KEYWORDS"].split(",") if w.strip()]
+    if os.environ.get("TG_OWNER_IDS"):
+        ids = []
+        for w in os.environ["TG_OWNER_IDS"].split(","):
+            try:
+                ids.append(int(w.strip()))
+            except ValueError:
+                pass
+        if ids:
+            cfg["owner_ids"] = ids
     return cfg
 
 
@@ -85,6 +105,17 @@ BOT_ID = int(_CONFIG.get("bot_id", 0) or 0)
 # mentions the bot by @username or by one of these words also gets the
 # typing indicator.
 BOT_NAME_KEYWORDS = tuple(_CONFIG.get("bot_name_keywords", ()))
+
+# Optional: Telegram user ids allowed to talk to the bot in private
+# chats (normally just the owner). Empty = no restriction. When set,
+# private messages from anyone else are dropped silently; see
+# is_owner_dropped.
+OWNER_IDS = set()
+for _x in _CONFIG.get("owner_ids", ()):
+    try:
+        OWNER_IDS.add(int(_x))
+    except (TypeError, ValueError):
+        pass
 
 
 def load_offset() -> int:
@@ -135,11 +166,31 @@ def compact(update: dict) -> dict:
     return record
 
 
+def is_owner_dropped(record: dict) -> bool:
+    """Private chat from a non-owner while owner_ids is configured.
+
+    Such messages are dropped silently: no 👀 reaction, no typing
+    indicator, no queue entry (they land in dropped.log instead).
+    Group chats and my_chat_member events are never dropped here.
+    """
+    if not OWNER_IDS:
+        return False
+    if record.get("from_id") == BOT_ID:
+        return False
+    if record.get("kind") == "my_chat_member":
+        return False
+    if record.get("chat_type") != "private":
+        return False
+    return record.get("from_id") not in OWNER_IDS
+
+
 def is_relevant(record: dict) -> bool:
     if record["from_id"] == BOT_ID:
         return False
     if record["kind"] == "my_chat_member":
         return True
+    if is_owner_dropped(record):
+        return False
     if record["chat_type"] in ("group", "supergroup", "private"):
         return True
     if record.get("from_is_bot"):
@@ -152,7 +203,8 @@ def is_relevant(record: dict) -> bool:
 def needs_typing(record: dict) -> bool:
     """Whether an incoming relevant message should show typing at once.
 
-    Private chats always (only the owner talks to the bot there). In
+    Private chats always (when owner_ids is configured, non-owner
+    private messages have already been dropped before this point). In
     groups only when a human writes or the bot is named, so other
     bots' routine acknowledgements don't flash a typing indicator for
     a message that will get no reply.
@@ -231,8 +283,16 @@ def main() -> int:
     with open(QUEUE, "a", encoding="utf-8") as qf:
         for update in updates:
             record = compact(update)
-            qf.write(json.dumps(record, ensure_ascii=False) + "\n")
             max_id = max(max_id, int(update.get("update_id", 0)))
+            if is_owner_dropped(record):
+                try:
+                    with open(DROPPED, "a", encoding="utf-8") as df:
+                        df.write(json.dumps(
+                            record, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                continue
+            qf.write(json.dumps(record, ensure_ascii=False) + "\n")
             if is_relevant(record):
                 relevant.append(record)
                 mark_read(record)
