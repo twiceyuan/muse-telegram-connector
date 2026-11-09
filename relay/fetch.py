@@ -25,18 +25,27 @@ anyone else are then dropped silently — no 👀 reaction, no typing
 indicator, no queue entry; they are appended to dropped.log in the
 relay directory instead, so the owner can review them later. When
 owner_ids is not configured, every private message counts as
-relevant (the original behaviour). Group chats are unaffected.
+relevant (the original behaviour).
+
+Group chats can likewise be restricted with "group_ids" in
+local.json (or TG_GROUP_IDS): messages from groups that are not
+listed are dropped the same silent way. my_chat_member events are
+never dropped, so the watch still notices (and can report) when the
+bot is added to a new group — that is also how the owner learns the
+new group's id to allowlist it. When group_ids is not configured,
+every group the bot belongs to counts (the original behaviour).
 
 Setup: tell the scripts who your bot is in a local.json file placed
 in the relay directory (TG_RELAY_DIR, where queue.jsonl lives), e.g.
 {"bot_username": "your_bot_username", "bot_id": 123456789,
 "bot_name_keywords": ["your", "bot", "nicknames"],
-"owner_ids": [123456789]}, with the values from `tg.py get-me`.
-That file is local-only and never committed; the same keys can also
-come from TG_BOT_USERNAME / TG_BOT_ID / TG_BOT_NAME_KEYWORDS /
-TG_OWNER_IDS (comma-separated) environment variables, which take
-precedence. Point TG_CONNECTOR_BIN at the folder holding tg.py if
-you placed it somewhere else.
+"owner_ids": [123456789], "group_ids": [-123456789]}, with the
+values from `tg.py get-me`. That file is local-only and never
+committed; the same keys can also come from TG_BOT_USERNAME /
+TG_BOT_ID / TG_BOT_NAME_KEYWORDS / TG_OWNER_IDS / TG_GROUP_IDS
+(comma-separated) environment variables, which take precedence.
+Point TG_CONNECTOR_BIN at the folder holding tg.py if you placed it
+somewhere else.
 """
 import json
 import os
@@ -93,6 +102,15 @@ def load_local_config() -> dict:
                 pass
         if ids:
             cfg["owner_ids"] = ids
+    if os.environ.get("TG_GROUP_IDS"):
+        ids = []
+        for w in os.environ["TG_GROUP_IDS"].split(","):
+            try:
+                ids.append(int(w.strip()))
+            except ValueError:
+                pass
+        if ids:
+            cfg["group_ids"] = ids
     return cfg
 
 
@@ -114,6 +132,16 @@ OWNER_IDS = set()
 for _x in _CONFIG.get("owner_ids", ()):
     try:
         OWNER_IDS.add(int(_x))
+    except (TypeError, ValueError):
+        pass
+
+# Optional: group/supergroup chat ids the bot should watch. Empty =
+# no restriction. When set, messages from other groups are dropped
+# silently; see is_group_dropped.
+GROUP_IDS = set()
+for _x in _CONFIG.get("group_ids", ()):
+    try:
+        GROUP_IDS.add(int(_x))
     except (TypeError, ValueError):
         pass
 
@@ -184,12 +212,35 @@ def is_owner_dropped(record: dict) -> bool:
     return record.get("from_id") not in OWNER_IDS
 
 
+def is_group_dropped(record: dict) -> bool:
+    """Group message from a group not in group_ids, when configured.
+
+    Dropped just as silently as a non-owner private message.
+    my_chat_member events are never dropped: the watch must still
+    notice when the bot is added to a new group (and learn its id).
+    Private chats are governed by is_owner_dropped instead.
+    """
+    if not GROUP_IDS:
+        return False
+    if record.get("from_id") == BOT_ID:
+        return False
+    if record.get("kind") == "my_chat_member":
+        return False
+    if record.get("chat_type") not in ("group", "supergroup"):
+        return False
+    return record.get("chat_id") not in GROUP_IDS
+
+
+def is_dropped(record: dict) -> bool:
+    return is_owner_dropped(record) or is_group_dropped(record)
+
+
 def is_relevant(record: dict) -> bool:
     if record["from_id"] == BOT_ID:
         return False
     if record["kind"] == "my_chat_member":
         return True
-    if is_owner_dropped(record):
+    if is_dropped(record):
         return False
     if record["chat_type"] in ("group", "supergroup", "private"):
         return True
@@ -284,7 +335,7 @@ def main() -> int:
         for update in updates:
             record = compact(update)
             max_id = max(max_id, int(update.get("update_id", 0)))
-            if is_owner_dropped(record):
+            if is_dropped(record):
                 try:
                     with open(DROPPED, "a", encoding="utf-8") as df:
                         df.write(json.dumps(
