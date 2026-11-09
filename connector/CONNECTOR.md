@@ -2,7 +2,7 @@
 
 - `custom.telegram-bot` connects Muse to the Telegram Bot API at `api.telegram.org`. It authenticates with the registered `api_key` credential, which is the bot token you created with BotFather for your own bot.
 
-- Helpers live in `~/workspace/custom-connectors/custom.telegram-bot/bin/`. The helper `tg.py` offers get-me, get-updates, send-message, send-photo, get-chat, set-webhook, get-webhook-info and delete-webhook. `send-message` sends a typing chat action just before the message by default (use `--no-typing` to skip it); `send-photo --chat-id <id> --photo <file> [--caption ...]` sends an upload_photo chat action first, then uploads the local file.
+- Helpers live in `~/workspace/custom-connectors/custom.telegram-bot/bin/`. The helper `tg.py` offers get-me, get-updates, send-message, send-photo, get-chat, chat-action, react, set-webhook, get-webhook-info and delete-webhook. `send-message` sends a typing chat action just before the message by default (use `--no-typing` to skip it); `send-photo --chat-id <id> --photo <file> [--caption ...]` sends an upload_photo chat action first, then uploads the local file. `chat-action --chat-id <id> --action typing` sends a chat action on its own. `react --chat-id <id> --message-id <n> [--emoji 👀]` adds an emoji reaction (default 👀, used as a read receipt). The example relay scripts (`examples/fetch.py`) automatically react 👀 on each fresh relevant message they pull, and start a detached `typing_keeper.py` that keeps a typing indicator visible until the message is marked handled (private chats always; in groups only when the owner writes or the bot is named).
 
 ## Connect
 

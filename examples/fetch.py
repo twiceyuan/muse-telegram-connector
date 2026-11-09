@@ -4,7 +4,10 @@
 Designed to be run from inside a Muse agent turn (a scheduled watch
 task, for example), because only agent turns can use the connector
 credential. Appends compact records to queue.jsonl, persists the
-getUpdates offset in state.json, and prints a digest:
+getUpdates offset in state.json, and prints a digest. Each fresh
+relevant message gets a 👀 reaction at once (read receipt) and, when a
+reply is plausible, a typing indicator kept alive by a detached
+typing_keeper.py until the message is marked handled:
 
 - "NONE" when nothing relevant arrived
 - "RELEVANT <n>" plus one compact line per relevant update
@@ -38,6 +41,12 @@ QUEUE = os.path.join(BASE, "queue.jsonl")
 # Fill these in from `tg.py get-me`.
 BOT_USERNAME = "your_bot_username"
 BOT_ID = 0
+
+# Optional: words that count as naming the bot in group text (its
+# display name, for example). A group message from another bot that
+# mentions the bot by @username or by one of these words also gets the
+# typing indicator.
+BOT_NAME_KEYWORDS = ()
 
 
 def load_offset() -> int:
@@ -76,6 +85,7 @@ def compact(update: dict) -> dict:
         "from_is_bot": sender.get("is_bot", False),
         "text": msg.get("text") or msg.get("caption"),
         "reply_to_message_id": (msg.get("reply_to_message") or {}).get("message_id"),
+        "new_chat_members": [m.get("username") for m in msg.get("new_chat_members", [])],
     }
     if "my_chat_member" in update:
         mcm = update["my_chat_member"]
@@ -101,6 +111,70 @@ def is_relevant(record: dict) -> bool:
     return False
 
 
+def needs_typing(record: dict) -> bool:
+    """Whether an incoming relevant message should show typing at once.
+
+    Private chats always (only the owner talks to the bot there). In
+    groups only when a human writes or the bot is named, so other
+    bots' routine acknowledgements don't flash a typing indicator for
+    a message that will get no reply.
+    """
+    if record.get("kind") != "message" or not record.get("message_id"):
+        return False
+    if record.get("chat_type") == "private":
+        return True
+    if record.get("chat_type") in ("group", "supergroup"):
+        if not record.get("from_is_bot"):
+            return True
+        text = record.get("text") or ""
+        if ("@" + BOT_USERNAME) in text:
+            return True
+        low = text.lower()
+        if any(word in low for word in BOT_NAME_KEYWORDS):
+            return True
+    return False
+
+
+def signal_typing(record: dict) -> None:
+    """Best-effort typing indicator the moment a relevant message lands.
+
+    Telegram typing lasts ~5s but agent turns take minutes, so spawn a
+    detached keeper (typing_keeper.py, placed next to this script's
+    data directory) that refreshes it until the message is marked
+    handled. Never blocks the fetch loop.
+    """
+    import subprocess
+    if not needs_typing(record):
+        return
+    key = "%s:%s" % (record["chat_id"], record["message_id"])
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.join(BASE, "typing_keeper.py"),
+             str(record["chat_id"]), key],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    except Exception:
+        pass
+
+
+def mark_read(record: dict) -> None:
+    """Best-effort 👀 reaction on a message just pulled (read receipt).
+
+    Only for fresh (non-edited) messages with an id; failures are
+    ignored so a reaction problem never blocks the fetch loop.
+    """
+    if record.get("kind") != "message" or not record.get("message_id"):
+        return
+    try:
+        tg.call("setMessageReaction", {
+            "chat_id": record["chat_id"],
+            "message_id": record["message_id"],
+            "reaction": [{"type": "emoji", "emoji": "👀"}],
+        })
+    except Exception:
+        pass
+
+
 def main() -> int:
     os.makedirs(BASE, exist_ok=True)
     offset = load_offset()
@@ -123,6 +197,8 @@ def main() -> int:
             max_id = max(max_id, int(update.get("update_id", 0)))
             if is_relevant(record):
                 relevant.append(record)
+                mark_read(record)
+                signal_typing(record)
     if updates:
         save_offset(max_id + 1)
     if not relevant:

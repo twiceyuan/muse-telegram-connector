@@ -53,7 +53,7 @@ After this you can add the bot to a group, or DM it to leave messages for your M
 
 If you want Muse to actively watch group messages (for example, to coordinate with another agent in the same group), have it do three more things:
 
-1. Copy `examples/fetch.py` to `~/workspace/telegram-relay/fetch.py`, replacing the `BOT_USERNAME` and `BOT_ID` placeholders with the real values from Step 4's get-me output.
+1. Copy both `examples/fetch.py` and `examples/typing_keeper.py` into `~/workspace/telegram-relay/`, replacing the `BOT_USERNAME` and `BOT_ID` placeholders in fetch.py with the real values from Step 4's get-me output. fetch.py reacts 👀 to each relevant message the moment it is pulled (a read receipt) and, when a reply is plausible, starts typing_keeper.py to keep a "typing..." indicator alive until the message is marked handled.
 2. Create a scheduled task (every 5 minutes is a good default) using the contents of `examples/watch-task.md` as the task instructions, with its placeholders replaced.
 3. The behavioral rules (when to speak, how many rounds of disagreement, when to escalate to you) live in that template; adjust them to taste.
 
@@ -71,7 +71,8 @@ connector/
   CONNECTOR.md          Operating doc (your Muse reads it when calling the API)
   bin/tg.py             Bot API command-line helper
 examples/
-  fetch.py              getUpdates queue script (offset watermark + relevance pre-filter)
+  fetch.py              getUpdates queue script (offset watermark + relevance pre-filter + 👀 read reactions)
+  typing_keeper.py      Tiny keeper that holds a "typing..." indicator until a message is handled
   watch-task.md         Instruction template for the message-watch scheduled task
 ```
 

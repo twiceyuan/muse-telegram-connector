@@ -134,6 +134,17 @@ def main() -> int:
                          action="store_false", default=True,
                          help="skip the upload_photo chat action first")
 
+    p_act = sub.add_parser("chat-action")
+    p_act.add_argument("--chat-id", required=True)
+    p_act.add_argument("--action", default="typing",
+                       help="e.g. typing, upload_photo, record_video")
+
+    p_react = sub.add_parser("react")
+    p_react.add_argument("--chat-id", required=True)
+    p_react.add_argument("--message-id", type=int, required=True)
+    p_react.add_argument("--emoji", default="👀",
+                         help="reaction emoji, default 👀 (read/seen)")
+
     p_chat = sub.add_parser("get-chat")
     p_chat.add_argument("--chat-id", required=True)
 
@@ -183,6 +194,15 @@ def main() -> int:
         if args.thread_id is not None:
             fields["message_thread_id"] = args.thread_id
         result = call_multipart("sendPhoto", fields, "photo", args.photo)
+    elif args.cmd == "chat-action":
+        result = call("sendChatAction",
+                      {"chat_id": args.chat_id, "action": args.action})
+    elif args.cmd == "react":
+        result = call("setMessageReaction", {
+            "chat_id": args.chat_id,
+            "message_id": args.message_id,
+            "reaction": [{"type": "emoji", "emoji": args.emoji}],
+        })
     elif args.cmd == "get-chat":
         result = call("getChat", {"chat_id": args.chat_id})
     elif args.cmd == "set-webhook":

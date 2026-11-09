@@ -53,7 +53,7 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 
 如果你想让 Muse 主动盯着群消息（例如和另一个 agent 在群里协作），让它再做三件事：
 
-1. 把 `examples/fetch.py` 放到 `~/workspace/telegram-relay/fetch.py`，并把文件里 `BOT_USERNAME` 和 `BOT_ID` 两个占位符换成第 4 步 get-me 返回的真实值。
+1. 把 `examples/fetch.py` 和 `examples/typing_keeper.py` 都放到 `~/workspace/telegram-relay/`，并把 fetch.py 里 `BOT_USERNAME` 和 `BOT_ID` 两个占位符换成第 4 步 get-me 返回的真实值。fetch.py 拉到相关消息会立刻打 👀 反应（已读回执），并在可能要回复时拉起 typing_keeper.py 保持「正在输入」直到消息被标记处理完。
 2. 用 `examples/watch-task.md` 的内容作为定时任务的指令模板（替换其中的占位符），建一个每 5 分钟运行的定时任务。
 3. 值守的行为边界（什么时候发言、分歧几轮、什么时候找你）都写在模板里，可按你的需要改。
 
@@ -71,7 +71,8 @@ connector/
   CONNECTOR.md          连接器操作文档（你的 Muse 日常调用时读它）
   bin/tg.py             Bot API 命令行助手
 examples/
-  fetch.py              getUpdates 队列化脚本（offset 水位 + 相关消息粗筛）
+  fetch.py              getUpdates 队列化脚本（offset 水位 + 相关消息粗筛 + 👀 已读反应）
+  typing_keeper.py      保持「正在输入」指示直到消息处理完的小守护脚本
   watch-task.md         消息值守定时任务的指令模板
 ```
 
