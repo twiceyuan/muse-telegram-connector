@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Example: fetch new Telegram updates into a local queue file.
+"""Fetch new Telegram updates into a local queue file.
 
 Designed to be run from inside a Muse agent turn (a scheduled watch
 task, for example), because only agent turns can use the connector

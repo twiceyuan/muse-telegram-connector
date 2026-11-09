@@ -2,7 +2,7 @@
 
 - `custom.telegram-bot` connects Muse to the Telegram Bot API at `api.telegram.org`. It authenticates with the registered `api_key` credential, which is the bot token you created with BotFather for your own bot.
 
-- Helpers live in `~/workspace/custom-connectors/custom.telegram-bot/bin/`. The helper `tg.py` offers get-me, get-updates, send-message, send-photo, get-chat, chat-action, react, set-webhook, get-webhook-info and delete-webhook. `send-message` sends a typing chat action just before the message by default (use `--no-typing` to skip it); `send-photo --chat-id <id> --photo <file> [--caption ...]` sends an upload_photo chat action first, then uploads the local file. `chat-action --chat-id <id> --action typing` sends a chat action on its own. `react --chat-id <id> --message-id <n> [--emoji 👀]` adds an emoji reaction (default 👀, used as a read receipt). The example relay scripts (`examples/fetch.py` / `examples/watch.py`) automatically react 👀 on each fresh relevant message they pull, and start a detached `typing_keeper.py` that keeps a typing indicator visible until the message is marked handled (private chats always; in groups only when the owner writes or the bot is named).
+- Helpers live in `~/workspace/custom-connectors/custom.telegram-bot/bin/`. The helper `tg.py` offers get-me, get-updates, send-message, send-photo, get-chat, chat-action, react, set-webhook, get-webhook-info and delete-webhook. `send-message` sends a typing chat action just before the message by default (use `--no-typing` to skip it); `send-photo --chat-id <id> --photo <file> [--caption ...]` sends an upload_photo chat action first, then uploads the local file. `chat-action --chat-id <id> --action typing` sends a chat action on its own. `react --chat-id <id> --message-id <n> [--emoji 👀]` adds an emoji reaction (default 👀, used as a read receipt). The relay scripts (`relay/fetch.py` / `relay/watch.py`) automatically react 👀 on each fresh relevant message they pull, and start a detached `typing_keeper.py` that keeps a typing indicator visible until the message is marked handled (private chats always; in groups only when the owner writes or the bot is named).
 
 ## Connect
 
@@ -53,13 +53,13 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 
 ## Fetch new messages
 
-- Read the updates Telegram buffered for the bot. getUpdates with an offset confirms all earlier updates, so advance the offset only after the updates are safely stored. The example scripts `examples/fetch.py` / `examples/watch.py` in the repository own that state and print a NONE, RELEVANT or ERROR digest.
+- Read the updates Telegram buffered for the bot. getUpdates with an offset confirms all earlier updates, so advance the offset only after the updates are safely stored. The relay scripts `relay/fetch.py` / `relay/watch.py` in the repository own that state and print a NONE, RELEVANT or ERROR digest.
 
 ```text
 python3 ~/workspace/telegram-relay/fetch.py
 ```
 
-- The scripts append compact records to `~/workspace/telegram-relay/queue.jsonl`, persist the offset in `~/workspace/telegram-relay/state.json`, and run only inside agent turns, because hooks and system services have no connector credentials in this runtime. The bot's own username, id and name keywords come from a `local.json` in the relay directory (see `examples/fetch.py`); that file is local-only and never committed.
+- The scripts append compact records to `~/workspace/telegram-relay/queue.jsonl`, persist the offset in `~/workspace/telegram-relay/state.json`, and run only inside agent turns, because hooks and system services have no connector credentials in this runtime. The bot's own username, id and name keywords come from a `local.json` in the relay directory (see `relay/fetch.py`); that file is local-only and never committed.
 
 ## Send a message
 

@@ -53,15 +53,15 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 
 如果你想让 Muse 主动盯着群消息（例如和另一个 agent 在群里协作），让它再做三件事：
 
-1. 把 `examples/fetch.py`、`examples/watch.py` 和 `examples/typing_keeper.py` 都放到 `~/workspace/telegram-relay/`，再在该目录建一个 `local.json`，把第 4 步 get-me 返回的 bot 身份写进去（`{"bot_username": ..., "bot_id": ..., "bot_name_keywords": [...]}`）。这个文件只放本机、不进仓库。fetch.py / watch.py 拉到相关消息会立刻打 👀 反应（已读回执），并在可能要回复时拉起 typing_keeper.py 保持「正在输入」直到消息被标记处理完；watch.py 以 600 秒为一片做长轮询。
-2. 用 `examples/watch-task.md` 的内容作为定时任务的指令模板（替换其中的占位符），建一个每 10 分钟运行的定时任务。模板用「监督者＋短 watcher」机制：每轮先查 watcher 心跳，健康就秒退；watcher 一任约 60 分钟，靠 watch.py 的 `--wait-lock` 在文件锁上排队无缝交接。
+1. 把 `relay/fetch.py`、`relay/watch.py` 和 `relay/typing_keeper.py` 都放到 `~/workspace/telegram-relay/`，再在该目录建一个 `local.json`，把第 4 步 get-me 返回的 bot 身份写进去（`{"bot_username": ..., "bot_id": ..., "bot_name_keywords": [...]}`）。这个文件只放本机、不进仓库。fetch.py / watch.py 拉到相关消息会立刻打 👀 反应（已读回执），并在可能要回复时拉起 typing_keeper.py 保持「正在输入」直到消息被标记处理完；watch.py 以 600 秒为一片做长轮询。
+2. 用 `relay/watch-task.md` 的内容作为定时任务的指令模板（替换其中的占位符），建一个每 10 分钟运行的定时任务。模板用「监督者＋短 watcher」机制：每轮先查 watcher 心跳，健康就秒退；watcher 一任约 60 分钟，靠 watch.py 的 `--wait-lock` 在文件锁上排队无缝交接。
 3. 值守的行为边界（什么时候发言、分歧几轮、什么时候找你）都写在模板里，可按你的需要改。
 
 ## 它能做什么
 
 - 以你的 Telegram bot 身份调用 Bot API：查身份（getMe）、拉新消息（getUpdates）、发消息（sendMessage，支持回复和话题）、查会话（getChat），外加 webhook 三件套（setWebhook / getWebhookInfo / deleteWebhook）
 - bot token 只存放在 Muse 的保险库里，脚本通过运行时的凭据交换使用，代码、文档、日志里不出现 token 明文
-- 附带消息队列化示例：新消息落盘成队列文件并维护 offset 水位，配合定时任务做群消息值守
+- 附带消息值守：新消息落盘成队列文件并维护 offset 水位，配合定时任务做群消息值守
 
 ## 仓库结构
 
@@ -70,7 +70,7 @@ connector/
   connector.yaml        连接器描述
   CONNECTOR.md          连接器操作文档（你的 Muse 日常调用时读它）
   bin/tg.py             Bot API 命令行助手
-examples/
+relay/
   fetch.py              getUpdates 队列化脚本（offset 水位 + 相关消息粗筛 + 👀 已读反应）
   watch.py              长轮询值守切片（600 秒一片，文件锁 + --wait-lock 无缝交接）
   typing_keeper.py      保持「正在输入」指示直到消息处理完的小守护脚本
