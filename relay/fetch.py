@@ -7,7 +7,11 @@ credential. Appends compact records to queue.jsonl, persists the
 getUpdates offset in state.json, and prints a digest. Each fresh
 relevant message gets a 👀 reaction at once (read receipt) and, when a
 reply is plausible, a typing indicator kept alive by a detached
-typing_keeper.py until the message is marked handled:
+typing_keeper.py until the message is marked handled, plus a detached
+stuck_watchdog.py that posts one hint into the chat if the message is
+still unhandled after a few minutes (the classic case is the agent
+being frozen on a user approval prompt that only exists in the host
+app, so the chat would otherwise see the bot read, type, then vanish):
 
 - "NONE" when nothing relevant arrived
 - "RELEVANT <n>" plus one compact line per relevant update
@@ -298,6 +302,30 @@ def signal_typing(record: dict) -> None:
         pass
 
 
+def signal_watchdog(record: dict) -> None:
+    """Best-effort stuck watchdog the moment a relevant message lands.
+
+    Spawns a detached stuck_watchdog.py (placed next to this script's
+    data directory) that watches this one message: if it is still
+    unhandled after a few minutes it posts one hint into the chat,
+    and it exits as soon as the message is marked handled. Same
+    population as the typing keeper (messages that may get a reply).
+    Never blocks the fetch loop.
+    """
+    import subprocess
+    if not needs_typing(record):
+        return
+    key = "%s:%s" % (record["chat_id"], record["message_id"])
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.join(BASE, "stuck_watchdog.py"),
+             str(record["chat_id"]), key],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    except Exception:
+        pass
+
+
 def mark_read(record: dict) -> None:
     """Best-effort 👀 reaction on a message just pulled (read receipt).
 
@@ -348,6 +376,7 @@ def main() -> int:
                 relevant.append(record)
                 mark_read(record)
                 signal_typing(record)
+                signal_watchdog(record)
     if updates:
         save_offset(max_id + 1)
     if not relevant:

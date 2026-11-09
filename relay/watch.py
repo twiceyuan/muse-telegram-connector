@@ -107,12 +107,21 @@ def main() -> int:
         with open(F.QUEUE, "a", encoding="utf-8") as qf:
             for update in updates:
                 record = F.compact(update)
-                qf.write(json.dumps(record, ensure_ascii=False) + "\n")
                 max_id = max(max_id, int(update.get("update_id", 0)))
+                if F.is_dropped(record):
+                    try:
+                        with open(F.DROPPED, "a", encoding="utf-8") as df:
+                            df.write(json.dumps(
+                                record, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
+                    continue
+                qf.write(json.dumps(record, ensure_ascii=False) + "\n")
                 if F.is_relevant(record):
                     relevant.append(record)
                     F.mark_read(record)
                     F.signal_typing(record)
+                    F.signal_watchdog(record)
         F.save_offset(max_id + 1)
         if relevant:
             print(f"RELEVANT {len(relevant)}")
