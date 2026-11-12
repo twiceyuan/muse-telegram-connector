@@ -59,13 +59,26 @@ def digest_line(r: dict) -> str:
     return json.dumps(line, ensure_ascii=False)
 
 
+def _int_flag(name: str, default: int):
+    """Parse `--name <int>`; None signals a malformed invocation
+    (flag present but its value missing or not an integer)."""
+    if name not in sys.argv:
+        return default
+    idx = sys.argv.index(name) + 1
+    if idx >= len(sys.argv):
+        return None
+    try:
+        return int(sys.argv[idx])
+    except ValueError:
+        return None
+
+
 def main() -> int:
-    slice_secs = 600
-    if "--slice" in sys.argv:
-        slice_secs = int(sys.argv[sys.argv.index("--slice") + 1])
-    wait_lock = 0
-    if "--wait-lock" in sys.argv:
-        wait_lock = int(sys.argv[sys.argv.index("--wait-lock") + 1])
+    slice_secs = _int_flag("--slice", 600)
+    wait_lock = _int_flag("--wait-lock", 0)
+    if slice_secs is None or wait_lock is None:
+        print("ERROR usage: watch.py [--slice <secs>] [--wait-lock <secs>]")
+        return 2
     os.makedirs(BASE, exist_ok=True)
     lock_fh = open(LOCK, "w")
     wait_deadline = time.time() + wait_lock

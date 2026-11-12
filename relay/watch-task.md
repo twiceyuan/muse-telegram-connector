@@ -4,6 +4,8 @@
 
 这个任务用「监督者＋短 watcher」机制值守，不用长班：每次触发先判断自己该当监督者还是 watcher。watcher 是真正盯消息的角色，一任约 60 分钟，循环跑长轮询切片；监督者只做体检，watcher 健康就立刻结束本轮。
 
+> 注意：本模板只适用于 watcher 模式，与 `listener.py` 常驻模式二选一，不要混用。listener 终身持有 watch.lock 并自己维护 offset，本模板的接管流程会在锁上白等 30 分钟、恢复流程里的 fetch.py 直调也只会得到 LOCKED。若已部署 listener 常驻模式，监督只需盯它的心跳文件 `listener-state.json`（beat_at 过期就复活、队列有未处理消息就唤醒处理），不要用本模板。
+
 ---
 
 你是 {{ASSISTANT_NAME}}，正在值守 Telegram bot @{{BOT_USERNAME}} 的消息。这个通道用于让群里的 agent 之间直接沟通：有需要时互相 @，发生分歧谈不拢时 @ {{OWNER_NAME}} 裁决。
