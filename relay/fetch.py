@@ -51,6 +51,7 @@ TG_BOT_ID / TG_BOT_NAME_KEYWORDS / TG_OWNER_IDS / TG_GROUP_IDS
 Point TG_CONNECTOR_BIN at the folder holding tg.py if you placed it
 somewhere else.
 """
+import fcntl
 import json
 import os
 import sys
@@ -346,6 +347,19 @@ def mark_read(record: dict) -> None:
 
 def main() -> int:
     os.makedirs(BASE, exist_ok=True)
+    # Only one getUpdates consumer at a time: watch.py slices and the
+    # resident listener hold watch.lock for their whole lifetime, so a
+    # direct fetch.py run (recovery backfill, end-of-term sweep) must
+    # stand down while the lock is held instead of racing the holder
+    # with a second concurrent consumer — Telegram would 409 one of
+    # them, and queue/offset writes could interleave. The handle stays
+    # referenced for the whole run so GC cannot release the flock.
+    lock_fh = open(os.path.join(BASE, "watch.lock"), "w")
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("LOCKED")
+        return 0
     offset = load_offset()
     result = tg.call("getUpdates", {
         "offset": offset,

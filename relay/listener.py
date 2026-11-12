@@ -104,14 +104,16 @@ def fsync_path(path: str) -> None:
         pass
 
 
-def process_updates(updates) -> int:
+def process_updates(updates, offset: int) -> int:
     """Same handling as fetch.main: queue everything not dropped and
     advance the offset only after the queue write is durable; side
     signals (read receipt, typing, watchdog) fire after the offset is
     committed, best-effort. A single malformed update is logged and
     skipped so it cannot wedge the stream behind it (Codex review).
-    Returns the number of relevant records."""
-    offset = relay.load_offset()
+    The offset passed in is the one the getUpdates request was made
+    with — re-reading it from disk here could diverge from that batch
+    if anything else ever advances it mid-flight. Returns the number
+    of relevant records."""
     relevant_records = []
     max_id = offset - 1
     with open(relay.QUEUE, "a", encoding="utf-8") as qf:
@@ -188,9 +190,13 @@ def main() -> int:
     backoff = BACKOFF_START
     while not os.path.exists(STOP):
         cycle_start = time.time()
+        # Snapshot the offset once per cycle: the same value goes into
+        # the getUpdates request and into process_updates, so the batch
+        # and its offset bookkeeping can never diverge.
+        offset = relay.load_offset()
         try:
             result = relay.tg.call("getUpdates", {
-                "offset": relay.load_offset(),
+                "offset": offset,
                 "timeout": POLL_TIMEOUT,
                 "limit": 100,
                 "allowed_updates": ["message", "edited_message",
@@ -207,7 +213,7 @@ def main() -> int:
             state["last_ok_at"] = now
             state["cycles"] += 1
             try:
-                n = process_updates(result.get("result", []))
+                n = process_updates(result.get("result", []), offset)
             except Exception:
                 # Batch-level processing failure: back off like an API
                 # failure instead of spinning at 1/s (Codex review).
