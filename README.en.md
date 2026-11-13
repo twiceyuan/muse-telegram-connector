@@ -27,15 +27,17 @@ Muse registers an API credential with the parameters below and sends you a secur
 }
 ```
 
-### Step 3 (Muse): place the connector files
+### Step 3 (Muse): link the connector files into the workspace
 
-Copy this repository's files into the Muse workspace using this mapping:
+Clone this repository to a stable location (for example `~/workspace/github-publish/muse-telegram-connector`), then **symlink** the connector files into the Muse workspace — do not copy them:
 
-| In this repo | Goes to |
+| Link (create in the workspace) | Target (file in the clone) |
 | --- | --- |
-| `connector/connector.yaml` | `~/workspace/custom-connectors/custom.telegram-bot/connector.yaml` |
-| `connector/CONNECTOR.md` | `~/workspace/custom-connectors/custom.telegram-bot/CONNECTOR.md` |
-| `connector/bin/tg.py` | `~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py` |
+| `~/workspace/custom-connectors/custom.telegram-bot/connector.yaml` | `connector/connector.yaml` |
+| `~/workspace/custom-connectors/custom.telegram-bot/CONNECTOR.md` | `connector/CONNECTOR.md` |
+| `~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py` | `connector/bin/tg.py` |
+
+Symlinks keep exactly one source of truth between the deployment and the repo: updating later is just a `git pull` in the clone and takes effect immediately; copied files inevitably drift away from the repo.
 
 ### Step 4 (Muse): verify
 
@@ -55,7 +57,7 @@ If you want Muse to actively watch messages (for example, to coordinate with ano
 
 **5.1 Place the relay files and write the local config**
 
-Copy the scripts under `relay/` into `~/workspace/telegram-relay/`, then create a `local.json` in that directory (stays on your machine, never enters the repo) with the bot identity from Step 4's get-me output:
+Symlink the scripts under `relay/` into `~/workspace/telegram-relay/` (pointing at the clone from Step 3, not copies, for the same reason), then create a `local.json` in that directory (stays on your machine, never enters the repo) with the bot identity from Step 4's get-me output:
 
 ```json
 {"bot_username": "...", "bot_id": 123456789, "bot_name_keywords": ["keywords from your bot's display name"]}

@@ -27,15 +27,17 @@ Muse 调用凭据登记，参数如下，然后把生成的安全页面链接发
 }
 ```
 
-### 第 3 步（Muse 做）：放置连接器文件
+### 第 3 步（Muse 做）：把连接器文件链接进工作区
 
-把本仓库的文件按下面的对应关系放进 Muse 的工作区：
+先把本仓库克隆到一个固定位置（例如 `~/workspace/github-publish/muse-telegram-connector`），再把连接器文件以**符号链接**放进 Muse 的工作区，不要复制：
 
-| 本仓库路径 | 放到 |
+| 链接（在工作区里建） | 指向（克隆里的文件） |
 | --- | --- |
-| `connector/connector.yaml` | `~/workspace/custom-connectors/custom.telegram-bot/connector.yaml` |
-| `connector/CONNECTOR.md` | `~/workspace/custom-connectors/custom.telegram-bot/CONNECTOR.md` |
-| `connector/bin/tg.py` | `~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py` |
+| `~/workspace/custom-connectors/custom.telegram-bot/connector.yaml` | `connector/connector.yaml` |
+| `~/workspace/custom-connectors/custom.telegram-bot/CONNECTOR.md` | `connector/CONNECTOR.md` |
+| `~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py` | `connector/bin/tg.py` |
+
+用链接而不是复制，是为了让本地部署和仓库永远只有一份正本：以后更新只需要在克隆里 `git pull`，部署立即生效；复制出来的副本迟早会和仓库不一致。
 
 ### 第 4 步（Muse 做）：验证
 
@@ -55,7 +57,7 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 
 **5.1 放置 relay 文件并写本机配置**
 
-把 `relay/` 下的脚本放到 `~/workspace/telegram-relay/`，再在该目录建一个 `local.json`（只放本机、不进仓库），把第 4 步 get-me 返回的 bot 身份写进去：
+把 `relay/` 下的脚本以符号链接放进 `~/workspace/telegram-relay/`（指向第 3 步的克隆，不要复制，理由同上），再在该目录建一个 `local.json`（只放本机、不进仓库），把第 4 步 get-me 返回的 bot 身份写进去：
 
 ```json
 {"bot_username": "...", "bot_id": 123456789, "bot_name_keywords": ["你的 bot 显示名关键词"]}
