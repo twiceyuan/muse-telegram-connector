@@ -6,11 +6,11 @@
 # does not survive a VM replacement either. The liveness-hook fallback
 # (detached revival) covers the gap until this is re-run.
 set -euo pipefail
-DIR=/home/hatch/workspace/telegram-relay/systemd
-python3 - << 'PY'
-import os
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 - "$DIR/egress.env" << 'PY'
+import os, sys
 keys = ["http_proxy","https_proxy","HTTP_PROXY","HTTPS_PROXY","all_proxy","ALL_PROXY","no_proxy","NO_PROXY"]
-path = "/home/hatch/workspace/telegram-relay/systemd/egress.env"
+path = sys.argv[1]
 with open(path, "w", encoding="utf-8") as fh:
     for k in keys:
         if os.environ.get(k):

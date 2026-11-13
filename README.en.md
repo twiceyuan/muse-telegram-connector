@@ -27,17 +27,15 @@ Muse registers an API credential with the parameters below and sends you a secur
 }
 ```
 
-### Step 3 (Muse): link the connector files into the workspace
+### Step 3 (Muse): run the deploy script
 
-Clone this repository to a stable location (for example `~/workspace/github-publish/muse-telegram-connector`), then **symlink** the connector files into the Muse workspace — do not copy them:
+Clone this repository to a stable location (for example `~/workspace/github-publish/muse-telegram-connector`), then from the clone root run:
 
-| Link (create in the workspace) | Target (file in the clone) |
-| --- | --- |
-| `~/workspace/custom-connectors/custom.telegram-bot/connector.yaml` | `connector/connector.yaml` |
-| `~/workspace/custom-connectors/custom.telegram-bot/CONNECTOR.md` | `connector/CONNECTOR.md` |
-| `~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py` | `connector/bin/tg.py` |
+```bash
+bash deploy.sh
+```
 
-Symlinks keep exactly one source of truth between the deployment and the repo: updating later is just a `git pull` in the clone and takes effect immediately; copied files inevitably drift away from the repo.
+The script performs the whole file deployment (idempotent, safe to re-run): it **symlinks** the connector files (`connector/`) and the relay scripts (`relay/`, `systemd/`) into the workspace layout — links, not copies, so the deployment and the repo keep a single source of truth and updating is just a `git pull` in the clone; a pre-existing regular file at a target is first renamed to `.pre-deploy.bak`. It also creates the `local.json` template (an existing one is left untouched) and installs the systemd hosting used in Step 5. The only steps left to humans are the token (Step 2) and the personal values in `local.json` (Step 5).
 
 ### Step 4 (Muse): verify
 
@@ -57,7 +55,7 @@ If you want Muse to actively watch messages (for example, to coordinate with ano
 
 **5.1 Place the relay files and write the local config**
 
-Symlink the scripts under `relay/` into `~/workspace/telegram-relay/` (pointing at the clone from Step 3, not copies, for the same reason), then create a `local.json` in that directory (stays on your machine, never enters the repo) with the bot identity from Step 4's get-me output:
+The deploy script has already symlinked the `relay/` scripts into `~/workspace/telegram-relay/` and created the `local.json` template (stays on your machine, never enters the repo). Fill in the bot identity from Step 4's get-me output:
 
 ```json
 {"bot_username": "...", "bot_id": 123456789, "bot_name_keywords": ["keywords from your bot's display name"]}
@@ -74,7 +72,7 @@ Behavior you will see once it runs: each relevant message gets a 👀 reaction t
 
 `listener.py` is a zero-LLM long-polling daemon that pulls updates, queues them, and keeps a heartbeat (`listener-state.json`) fresh by itself. Pair it with an infrequent hook or scheduled task that wakes an agent to reply to unhandled queue records, and restores the daemon per the hosting notes below when the heartbeat goes stale. The behavioral rules (when to speak, how many rounds of disagreement, when to escalate to you) live in that task's instructions; adjust them to taste.
 
-Host it under systemd (files in `systemd/`): a daemon launched from agent turns does not live long (a detached process lived about 7 minutes at the median in our runs), and every death costs an agent wake-up. `tg-listener.service` uses `Restart=always` so a killed process is back within 3 seconds (verified); `install.sh` installs the unit under `/etc/systemd/system/` and enables it, and snapshots the current environment's egress proxy variables into `systemd/egress.env` for the service to reach the network — **that file carries runtime proxy credentials, stays on your machine, and must never be committed** (`install.sh` itself only generates it, so it is safe to commit). Note: a VM/runtime replacement wipes the unit and rotates the proxy credentials, so after a replacement the heartbeat watcher or a backstop task must re-run `install.sh` to restore hosting; a detached start is only the last resort. In 24 hours of production use with multiple VM replacements, systemd-hosted instances never died on their own and no messages were lost; Telegram keeps unconfirmed updates for about 24 hours, so short outages miss nothing.
+The systemd hosting is already installed by the deploy script (files in `systemd/`): a daemon launched from agent turns does not live long (a detached process lived about 7 minutes at the median in our runs), and every death costs an agent wake-up. `tg-listener.service` uses `Restart=always` so a killed process is back within 3 seconds (verified); `install.sh` installs the unit under `/etc/systemd/system/` and enables it, and snapshots the current environment's egress proxy variables into `systemd/egress.env` for the service to reach the network — **that file carries runtime proxy credentials, stays on your machine, and must never be committed** (`install.sh` itself only generates it, so it is safe to commit). Note: a VM/runtime replacement wipes the unit and rotates the proxy credentials, so after a replacement the heartbeat watcher or a backstop task must re-run `install.sh` to restore hosting; a detached start is only the last resort. In 24 hours of production use with multiple VM replacements, systemd-hosted instances never died on their own and no messages were lost; Telegram keeps unconfirmed updates for about 24 hours, so short outages miss nothing.
 
 ## What it does
 
@@ -97,6 +95,7 @@ relay/
 systemd/
   tg-listener.service   systemd unit for hosting the listener (Restart=always, heals in 3s)
   install.sh            Hosting install/recovery script (refreshes egress.env + installs the unit + restarts the service)
+deploy.sh               One-shot deployment script (all symlinks + local.json template + systemd hosting)
 ```
 
 ## Known limitations

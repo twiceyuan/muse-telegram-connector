@@ -27,17 +27,15 @@ Muse 调用凭据登记，参数如下，然后把生成的安全页面链接发
 }
 ```
 
-### 第 3 步（Muse 做）：把连接器文件链接进工作区
+### 第 3 步（Muse 做）：运行部署脚本
 
-先把本仓库克隆到一个固定位置（例如 `~/workspace/github-publish/muse-telegram-connector`），再把连接器文件以**符号链接**放进 Muse 的工作区，不要复制：
+把本仓库克隆到一个固定位置（例如 `~/workspace/github-publish/muse-telegram-connector`），在克隆根目录运行：
 
-| 链接（在工作区里建） | 指向（克隆里的文件） |
-| --- | --- |
-| `~/workspace/custom-connectors/custom.telegram-bot/connector.yaml` | `connector/connector.yaml` |
-| `~/workspace/custom-connectors/custom.telegram-bot/CONNECTOR.md` | `connector/CONNECTOR.md` |
-| `~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py` | `connector/bin/tg.py` |
+```bash
+bash deploy.sh
+```
 
-用链接而不是复制，是为了让本地部署和仓库永远只有一份正本：以后更新只需要在克隆里 `git pull`，部署立即生效；复制出来的副本迟早会和仓库不一致。
+脚本自动完成全部文件部署（可重复运行）：把连接器文件（`connector/`）和 relay 脚本（`relay/`、`systemd/`）以**符号链接**放进工作区对应位置——用链接不用复制，保证本地部署与仓库只有一份正本，更新只需在克隆里 `git pull`；目标位置若已有普通文件，会先改名备份为 `.pre-deploy.bak` 再建链接。脚本还会建好 `local.json` 模板（如已存在则不动），并安装好第 5 步要用的 systemd 托管。需要人参与的只剩两件：token（第 2 步）和 `local.json` 里的个人配置（第 5 步填）。
 
 ### 第 4 步（Muse 做）：验证
 
@@ -57,7 +55,7 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 
 **5.1 放置 relay 文件并写本机配置**
 
-把 `relay/` 下的脚本以符号链接放进 `~/workspace/telegram-relay/`（指向第 3 步的克隆，不要复制，理由同上），再在该目录建一个 `local.json`（只放本机、不进仓库），把第 4 步 get-me 返回的 bot 身份写进去：
+部署脚本已把 `relay/` 的脚本链接进 `~/workspace/telegram-relay/` 并建好 `local.json` 模板（只放本机、不进仓库）。把第 4 步 get-me 返回的 bot 身份填进去：
 
 ```json
 {"bot_username": "...", "bot_id": 123456789, "bot_name_keywords": ["你的 bot 显示名关键词"]}
@@ -74,7 +72,7 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 
 `listener.py` 是零 LLM 的长轮询守护进程，自己循环拉取、落队列、刷心跳（`listener-state.json`）。再配一个低频的 hook 或定时任务：队列里有未处理消息时唤醒 agent 回复；心跳过期时按托管规程恢复进程。值守的行为边界（什么时候发言、分歧几轮、什么时候找你）写在任务指令里，按需要改。
 
-用 systemd 托管它（文件在 `systemd/`）：只靠 agent 回合拉起的进程活不长（实测脱离运行中位寿命约 7 分钟），每次死亡都要唤醒 agent 复活。`tg-listener.service` 用 `Restart=always` 让进程被杀后 3 秒内自动拉起（已实测）；`install.sh` 负责把 unit 装到 `/etc/systemd/system/` 并启用，同时把当前环境的出口代理变量快照成 `systemd/egress.env` 供服务出网——**该文件含运行时代理凭据，只放本机、绝不提交进仓库**（`install.sh` 本身只是生成它，可以提交）。注意：VM/运行时替换会抹掉 unit 并轮换代理凭据，替换后需由盯心跳的 hook 或兜底任务重跑 `install.sh` 恢复托管，脱离启动只作最后兜底。实测 24 小时（期间 VM 被多次替换）：systemd 实例零自行死亡、消息零丢失，未确认的 updates 在 Telegram 侧保留约 24 小时，短时中断不会漏消息。
+systemd 托管已由部署脚本自动装好（文件在 `systemd/`）——只靠 agent 回合拉起的进程活不长（实测脱离运行中位寿命约 7 分钟），每次死亡都要唤醒 agent 复活。`tg-listener.service` 用 `Restart=always` 让进程被杀后 3 秒内自动拉起（已实测）；`install.sh` 负责把 unit 装到 `/etc/systemd/system/` 并启用，同时把当前环境的出口代理变量快照成 `systemd/egress.env` 供服务出网——**该文件含运行时代理凭据，只放本机、绝不提交进仓库**（`install.sh` 本身只是生成它，可以提交）。注意：VM/运行时替换会抹掉 unit 并轮换代理凭据，替换后需由盯心跳的 hook 或兜底任务重跑 `install.sh` 恢复托管，脱离启动只作最后兜底。实测 24 小时（期间 VM 被多次替换）：systemd 实例零自行死亡、消息零丢失，未确认的 updates 在 Telegram 侧保留约 24 小时，短时中断不会漏消息。
 
 ## 它能做什么
 
@@ -97,6 +95,7 @@ relay/
 systemd/
   tg-listener.service   systemd 托管 unit（Restart=always，3 秒自愈）
   install.sh            托管安装/恢复脚本（刷新 egress.env + 装 unit + 重启服务）
+deploy.sh               一键部署脚本（建全部符号链接 + local.json 模板 + 安装 systemd 托管）
 ```
 
 ## 已知限制
