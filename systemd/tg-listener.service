@@ -1,0 +1,22 @@
+[Unit]
+Description=Telegram resident listener (zero-LLM long polling)
+After=network.target
+StartLimitIntervalSec=0
+# Maintenance switch: while listener.stop exists the listener must not
+# run at all (rollback / manual stop). Checked before every (re)start.
+ConditionPathExists=!/home/hatch/workspace/telegram-relay/listener.stop
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/hatch/workspace/telegram-relay/listener.py
+WorkingDirectory=/home/hatch/workspace/telegram-relay
+EnvironmentFile=/home/hatch/workspace/telegram-relay/systemd/egress.env
+Environment=TG_RELAY_DIR=/home/hatch/workspace/telegram-relay
+Environment=HOME=/home/hatch
+Environment=TG_CONNECTOR_BIN=/home/hatch/workspace/custom-connectors/custom.telegram-bot/bin
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

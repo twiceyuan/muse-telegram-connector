@@ -57,6 +57,14 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 2. 用 `relay/watch-task.md` 的内容作为定时任务的指令模板（替换其中的占位符），建一个每 10 分钟运行的定时任务。模板用「监督者＋短 watcher」机制：每轮先查 watcher 心跳，健康就秒退；watcher 一任约 60 分钟，靠 watch.py 的 `--wait-lock` 在文件锁上排队无缝交接。
 3. 值守的行为边界（什么时候发言、分歧几轮、什么时候找你）都写在模板里，可按你的需要改。
 
+#### systemd 托管 listener（推荐）
+
+上面第 1 条里的 `listener.py` 如果只靠 hook/定时任务拉起，进程本身仍会在几分钟到一两小时后无声死亡（实测脱离运行的中位寿命只有约 7 分钟），每次死亡都要唤醒一次 agent 来复活。用 systemd 托管可以治本：
+
+- `systemd/tg-listener.service`：`Restart=always` + `RestartSec=3`，进程被 kill -9 后 3 秒内自动拉起（已实测）；`listener.lock` 保证同一时间只有一个实例，`listener.stop` 文件存在时不启动（维护开关）。
+- `systemd/install.sh`：把 unit 装到 `/etc/systemd/system/` 并 `daemon-reload` + `enable` + `restart`。它还会把当前环境的出口代理变量快照成 `systemd/egress.env`（600 权限），因为 unit 的 `EnvironmentFile` 要用它来出网——**这个文件含运行时代理凭据，只放本机，绝不提交进仓库**；`install.sh` 本身只是从当前环境生成它，可以提交。
+- VM/运行时替换会抹掉 `/etc/systemd/system/` 下的 unit（也轮换代理凭据），所以替换后监听会停，直到 hook 或每小时兜底任务发现心跳过期、重跑 `install.sh` 恢复托管（脱离启动只作最后兜底）。24 小时实测（2026-11-12 20:06 至 2026-11-13 20:17）：VM 被替换 13 次，systemd 实例零自行死亡、消息零丢失；Telegram 相关 hook 的输入 token 从试点一天的约 2580 万降到约 1155 万（-55%）。
+
 ## 它能做什么
 
 - 以你的 Telegram bot 身份调用 Bot API：查身份（getMe）、拉新消息（getUpdates）、发消息（sendMessage，支持回复和话题）、查会话（getChat），外加 webhook 三件套（setWebhook / getWebhookInfo / deleteWebhook）
@@ -77,11 +85,14 @@ relay/
   stuck_watchdog.py     单条消息的卡死看门狗：久未处理时在会话里发一条提示
   listener.py           零 LLM 常驻长轮询守护进程（可选模式，心跳文件 + 外部复活）
   watch-task.md         消息值守定时任务的指令模板（监督者＋短 watcher 机制）
+systemd/
+  tg-listener.service   systemd 托管 unit（Restart=always，3 秒自愈）
+  install.sh            重装托管脚本（刷新 egress.env + 装 unit + 重启服务）
 ```
 
 ## 已知限制
 
-- 消息监听靠长轮询。回复只能发生在 Muse 的 agent 回合里，所以 bot 的回复延迟仍是分钟级，做不到秒回。拉取有两种跑法：watch.py 切片只能在 agent 回合里跑；listener.py 常驻进程由 agent 回合拉起后可以自己持续拉取（凭据是逐请求交换的，进程内不驻留 token），但它活不过 VM/运行时替换，需要 hook 或定时任务盯心跳复活。
+- 消息监听靠长轮询。回复只能发生在 Muse 的 agent 回合里，所以 bot 的回复延迟仍是分钟级，做不到秒回。拉取有两种跑法：watch.py 切片只能在 agent 回合里跑；listener.py 常驻进程由 agent 回合拉起后可以自己持续拉取（凭据是逐请求交换的，进程内不驻留 token），但它活不过 VM/运行时替换，需要 hook 或定时任务盯心跳复活；推荐用 `systemd/` 的托管方式（见第 5 步），可将死亡收敛到只剩 VM 替换本身。
 - Webhook 命令已备好，但需要一个 Telegram 能访问的公网 HTTPS 接收端，且接收后仍需解决如何唤醒 agent，是否采用按你自己的环境权衡。
 - bot 只能看到它加入的会话的消息；未确认的 updates 在 Telegram 侧只保留约 24 小时，值守中断超过这个时长会漏消息。
 
