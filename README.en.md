@@ -68,11 +68,11 @@ Optional access control:
 
 Behavior you will see once it runs: each relevant message gets a 👀 reaction the moment it is pulled (a read receipt); while a reply is plausible, a "typing..." indicator is kept alive until the message is handled; and if one message stays unhandled for about five minutes (the classic case is the agent being frozen on an approval prompt in the host app), a watchdog posts one hint into the chat by itself.
 
-**5.2 Pick one run mode (the resident mode is recommended)**
+**5.2 Run mode: resident listener under systemd**
 
-- **Resident mode (recommended)**: `listener.py` is a zero-LLM long-polling daemon that pulls updates, queues them, and keeps a heartbeat (`listener-state.json`) fresh by itself. Pair it with an infrequent hook or scheduled task that wakes an agent to reply to unhandled queue records, and restores the daemon per the hosting notes below when the heartbeat goes stale. The behavioral rules (when to speak, how many rounds of disagreement, when to escalate to you) live in that task's instructions; adjust them to taste.
-  - **Host it under systemd** (files in `systemd/`): a daemon launched from agent turns does not live long (a detached process lived about 7 minutes at the median in our runs), and every death costs an agent wake-up. `tg-listener.service` uses `Restart=always` so a killed process is back within 3 seconds (verified); `install.sh` installs the unit under `/etc/systemd/system/` and enables it, and snapshots the current environment's egress proxy variables into `systemd/egress.env` for the service to reach the network — **that file carries runtime proxy credentials, stays on your machine, and must never be committed** (`install.sh` itself only generates it, so it is safe to commit). Note: a VM/runtime replacement wipes the unit and rotates the proxy credentials, so after a replacement the heartbeat watcher or a backstop task must re-run `install.sh` to restore hosting; a detached start is only the last resort. In 24 hours of production use with multiple VM replacements, systemd-hosted instances never died on their own and no messages were lost; Telegram keeps unconfirmed updates for about 24 hours, so short outages miss nothing.
-- **Slice mode (legacy alternative)**: `watch.py` long-polls in 600-second slices inside agent turns, handing over seamlessly via a file lock; the task template is `relay/watch-task.md`. It needs no resident process, but every slice occupies an agent turn. Pick one mode; do not mix them.
+`listener.py` is a zero-LLM long-polling daemon that pulls updates, queues them, and keeps a heartbeat (`listener-state.json`) fresh by itself. Pair it with an infrequent hook or scheduled task that wakes an agent to reply to unhandled queue records, and restores the daemon per the hosting notes below when the heartbeat goes stale. The behavioral rules (when to speak, how many rounds of disagreement, when to escalate to you) live in that task's instructions; adjust them to taste.
+
+Host it under systemd (files in `systemd/`): a daemon launched from agent turns does not live long (a detached process lived about 7 minutes at the median in our runs), and every death costs an agent wake-up. `tg-listener.service` uses `Restart=always` so a killed process is back within 3 seconds (verified); `install.sh` installs the unit under `/etc/systemd/system/` and enables it, and snapshots the current environment's egress proxy variables into `systemd/egress.env` for the service to reach the network — **that file carries runtime proxy credentials, stays on your machine, and must never be committed** (`install.sh` itself only generates it, so it is safe to commit). Note: a VM/runtime replacement wipes the unit and rotates the proxy credentials, so after a replacement the heartbeat watcher or a backstop task must re-run `install.sh` to restore hosting; a detached start is only the last resort. In 24 hours of production use with multiple VM replacements, systemd-hosted instances never died on their own and no messages were lost; Telegram keeps unconfirmed updates for about 24 hours, so short outages miss nothing.
 
 ## What it does
 
@@ -88,12 +88,10 @@ connector/
   CONNECTOR.md          Operating doc (your Muse reads it when calling the API)
   bin/tg.py             Bot API command-line helper
 relay/
-  fetch.py              getUpdates queue script (offset watermark + relevance pre-filter + 👀 read reactions), shared by listener and watch
-  listener.py           Zero-LLM resident long-poll daemon (recommended mode, heartbeat + external recovery)
-  watch.py              Long-poll watch slice (legacy alternative, 600s slices, file-lock handover)
+  fetch.py              getUpdates queue script (offset watermark + relevance pre-filter + 👀 read reactions); the listener's pulling core, also runnable standalone for backfill
+  listener.py           Zero-LLM resident long-poll daemon (heartbeat + external recovery)
   typing_keeper.py      Tiny keeper that holds a "typing..." indicator until a message is handled
   stuck_watchdog.py     Per-message stuck watchdog: posts one hint in the chat when handling stalls
-  watch-task.md         Instruction template for the slice-mode watch task
 systemd/
   tg-listener.service   systemd unit for hosting the listener (Restart=always, heals in 3s)
   install.sh            Hosting install/recovery script (refreshes egress.env + installs the unit + restarts the service)

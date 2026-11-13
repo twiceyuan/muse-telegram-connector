@@ -68,11 +68,11 @@ python3 ~/workspace/custom-connectors/custom.telegram-bot/bin/tg.py get-me
 
 跑起来之后你会看到的行为：相关消息被拉到的瞬间会打上 👀（已读回执）；可能要回复时会保持「正在输入」状态，直到消息处理完；某条消息超过约 5 分钟还没处理完（典型是 agent 卡在宿主应用的确认卡上），看门狗会自己在会话里发一条提示。
 
-**5.2 选一种运行模式（二选一，推荐常驻模式）**
+**5.2 运行模式：常驻监听＋systemd 托管**
 
-- **常驻模式（推荐）**：`listener.py` 是零 LLM 的长轮询守护进程，自己循环拉取、落队列、刷心跳（`listener-state.json`）。再配一个低频的 hook 或定时任务：队列里有未处理消息时唤醒 agent 回复；心跳过期时按下面的托管规程恢复进程。值守的行为边界（什么时候发言、分歧几轮、什么时候找你）写在任务指令里，按需要改。
-  - **用 systemd 托管它**（文件在 `systemd/`）：只靠 agent 回合拉起的进程活不长（实测脱离运行中位寿命约 7 分钟），每次死亡都要唤醒 agent 复活。`tg-listener.service` 用 `Restart=always` 让进程被杀后 3 秒内自动拉起（已实测）；`install.sh` 负责把 unit 装到 `/etc/systemd/system/` 并启用，同时把当前环境的出口代理变量快照成 `systemd/egress.env` 供服务出网——**该文件含运行时代理凭据，只放本机、绝不提交进仓库**（`install.sh` 本身只是生成它，可以提交）。注意：VM/运行时替换会抹掉 unit 并轮换代理凭据，替换后需由盯心跳的 hook 或兜底任务重跑 `install.sh` 恢复托管，脱离启动只作最后兜底。实测 24 小时（期间 VM 被多次替换）：systemd 实例零自行死亡、消息零丢失，未确认的 updates 在 Telegram 侧保留约 24 小时，短时中断不会漏消息。
-- **切片模式（旧版备选）**：`watch.py` 在 agent 回合内以 600 秒为一片长轮询，靠文件锁无缝交接，任务模板见 `relay/watch-task.md`。它不需要常驻进程，但每片都要占 agent 回合；与常驻模式二选一，不要混用。
+`listener.py` 是零 LLM 的长轮询守护进程，自己循环拉取、落队列、刷心跳（`listener-state.json`）。再配一个低频的 hook 或定时任务：队列里有未处理消息时唤醒 agent 回复；心跳过期时按托管规程恢复进程。值守的行为边界（什么时候发言、分歧几轮、什么时候找你）写在任务指令里，按需要改。
+
+用 systemd 托管它（文件在 `systemd/`）：只靠 agent 回合拉起的进程活不长（实测脱离运行中位寿命约 7 分钟），每次死亡都要唤醒 agent 复活。`tg-listener.service` 用 `Restart=always` 让进程被杀后 3 秒内自动拉起（已实测）；`install.sh` 负责把 unit 装到 `/etc/systemd/system/` 并启用，同时把当前环境的出口代理变量快照成 `systemd/egress.env` 供服务出网——**该文件含运行时代理凭据，只放本机、绝不提交进仓库**（`install.sh` 本身只是生成它，可以提交）。注意：VM/运行时替换会抹掉 unit 并轮换代理凭据，替换后需由盯心跳的 hook 或兜底任务重跑 `install.sh` 恢复托管，脱离启动只作最后兜底。实测 24 小时（期间 VM 被多次替换）：systemd 实例零自行死亡、消息零丢失，未确认的 updates 在 Telegram 侧保留约 24 小时，短时中断不会漏消息。
 
 ## 它能做什么
 
@@ -88,12 +88,10 @@ connector/
   CONNECTOR.md          连接器操作文档（你的 Muse 日常调用时读它）
   bin/tg.py             Bot API 命令行助手
 relay/
-  fetch.py              getUpdates 队列化脚本（offset 水位 + 相关消息粗筛 + 👀 已读反应），listener 与 watch 共用
-  listener.py           零 LLM 常驻长轮询守护进程（推荐模式，心跳文件 + 外部恢复）
-  watch.py              长轮询值守切片（旧版备选模式，600 秒一片、文件锁交接）
+  fetch.py              getUpdates 队列化脚本（offset 水位 + 相关消息粗筛 + 👀 已读反应），listener 的拉取核心，也可单独直调补漏
+  listener.py           零 LLM 常驻长轮询守护进程（心跳文件 + 外部恢复）
   typing_keeper.py      保持「正在输入」指示直到消息处理完的小守护脚本
   stuck_watchdog.py     单条消息的卡死看门狗：久未处理时在会话里发一条提示
-  watch-task.md         切片模式的值守任务指令模板
 systemd/
   tg-listener.service   systemd 托管 unit（Restart=always，3 秒自愈）
   install.sh            托管安装/恢复脚本（刷新 egress.env + 装 unit + 重启服务）

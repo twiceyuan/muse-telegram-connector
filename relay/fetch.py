@@ -347,9 +347,9 @@ def mark_read(record: dict) -> None:
 
 def main() -> int:
     os.makedirs(BASE, exist_ok=True)
-    # Only one getUpdates consumer at a time: watch.py slices and the
-    # resident listener hold watch.lock for their whole lifetime, so a
-    # direct fetch.py run (recovery backfill, end-of-term sweep) must
+    # Only one getUpdates consumer at a time: the resident listener
+    # holds watch.lock for its whole lifetime, so a direct fetch.py
+    # run (manual backfill or debugging) must
     # stand down while the lock is held instead of racing the holder
     # with a second concurrent consumer — Telegram would 409 one of
     # them, and queue/offset writes could interleave. The handle stays

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Resident Telegram listener (zero-LLM polling daemon).
 
-An alternative to the agent-driven watch.py slices: this process
-loops on getUpdates long polling itself, applies the exact same
+This process loops on getUpdates long polling itself, applies the exact same
 relevance/drop rules as fetch.py (by importing it), appends records
 to queue.jsonl, advances the offset only after records are durable
 on disk, and fires the same read-receipt / typing / stuck-watchdog
@@ -12,20 +11,22 @@ records, and to revive this process when it dies.
 Credential model: identical to fetch.py. Every getUpdates call goes
 through the connector's tg.call, which fetches a fresh credential
 surrogate per request; no token is ever present in this process.
-The process must therefore be launched from inside an agent turn
-(detached), exactly like typing_keeper.py. It does not survive VM /
-runtime replacements, so pair it with a lightweight supervisor (a
+In production it is hosted as a systemd service (see systemd/ in
+this repo): systemd restarts it within seconds when killed. It does
+not survive VM / runtime replacements (the unit lives outside the
+persistent home), so pair it with a runtime-managed supervisor (a
 hook or a scheduled task) that watches the heartbeat file below and
-relaunches it from an agent turn when the heartbeat goes stale.
+re-runs systemd/install.sh to restore hosting when the heartbeat
+goes stale.
 Message loss is still bounded by the offset discipline: the offset
 advances only after queue records are fsynced, and Telegram keeps
 unconfirmed updates for about 24 hours.
 
 Interlocks:
 - listener.lock: single instance; a second copy exits at once.
-- watch.lock (the legacy watch.py lock): held for the listener's
-  whole lifetime, so any legacy watcher slice prints LOCKED and
-  stands down instead of double-pulling.
+- watch.lock: held for the listener's whole lifetime, so a direct
+  fetch.py run prints LOCKED and stands down instead of
+  double-pulling.
 - listener.stop: if this file exists the listener exits at the next
   loop boundary and supervisors must not revive it (rollback /
   maintenance switch).
