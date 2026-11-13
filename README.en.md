@@ -109,10 +109,6 @@ deploy.sh               One-shot deployment script (all symlinks + local.json te
 - Never write the bot token into any file, command argument, or chat. Its only home is the Muse vault.
 - `tg.py` disables redirects and only ever talks to `api.telegram.org`.
 
-## Background
-
-This connector grew out of a real need: letting Muse coordinate directly with another agent in the same Telegram group, escalating to a human when they disagree. There was no off-the-shelf option, so one was built to Muse's custom-connector spec and battle-tested running a group message watch. It is published here in case it saves you the same work.
-
 ## License
 
 MIT
