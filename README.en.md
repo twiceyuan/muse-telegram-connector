@@ -51,25 +51,34 @@ After this you can add the bot to a group, or DM it to leave messages for your M
 
 ### Step 5 (optional, Muse): set up a message watch
 
-If you want Muse to actively watch group messages (for example, to coordinate with another agent in the same group), have it do three more things:
+If you want Muse to actively watch messages (for example, to coordinate with another agent in the same group), have it do two more things.
 
-1. Copy `relay/fetch.py`, `relay/watch.py`, `relay/typing_keeper.py`, `relay/stuck_watchdog.py`, and `relay/listener.py` into `~/workspace/telegram-relay/`, then create a `local.json` in that directory with the bot identity from Step 4's get-me output (`{"bot_username": ..., "bot_id": ..., "bot_name_keywords": [...]}`). That file stays on your machine and never enters the repo. Optional: add `"owner_ids": [your Telegram user id]` and private messages from anyone else are dropped silently (no 👀 reaction, no typing indicator, no queue entry; they are logged to a local dropped.log for later review); without it, every private message counts as relevant. Group chats can be restricted the same way with `"group_ids": [chat id]`: only listed groups are watched and other groups' messages are dropped silently (the event of the bot being added to a new group is never dropped, so the watch still notices and can learn the new group's id for the allowlist); without it, every group the bot belongs to counts. fetch.py / watch.py react 👀 to each relevant message the moment it is pulled (a read receipt) and, when a reply is plausible, start typing_keeper.py to keep a "typing..." indicator alive until the message is marked handled, plus stuck_watchdog.py watching that one message: if it is still unhandled after about five minutes (the classic case is the agent being frozen on an approval prompt in the host app), the watchdog posts one hint into the chat by itself and exits once the message is handled; watch.py long-polls in 600-second slices. Optional resident mode: `listener.py` is a zero-LLM long-polling daemon that pulls and queues updates by itself; an agent is woken only to reply to unhandled queue records, or to revive the daemon when its heartbeat (listener-state.json) goes stale, checked by a hook or an infrequent scheduled task. It dies with VM/runtime replacements, but the offset discipline means a revived daemon loses nothing (Telegram keeps unconfirmed updates for about 24 hours).
-2. Create a scheduled task (every 10 minutes) using the contents of `relay/watch-task.md` as the task instructions, with its placeholders replaced. The template uses a supervisor-plus-short-watcher pattern: each run first checks the watcher heartbeat and exits at once when healthy; a watcher serves a term of about 60 minutes, handing over seamlessly by queueing on a file lock with watch.py's `--wait-lock`.
-3. The behavioral rules (when to speak, how many rounds of disagreement, when to escalate to you) live in that template; adjust them to taste.
+**5.1 Place the relay files and write the local config**
 
-#### Hosting the listener with systemd (recommended)
+Copy the scripts under `relay/` into `~/workspace/telegram-relay/`, then create a `local.json` in that directory (stays on your machine, never enters the repo) with the bot identity from Step 4's get-me output:
 
-The `listener.py` from item 1 above still dies silently after minutes to an hour or two when it is only revived by a hook or scheduled task (in our runs a detached process lived about 7 minutes at the median), and every death costs one agent wake-up to revive it. Hosting it under systemd fixes that:
+```json
+{"bot_username": "...", "bot_id": 123456789, "bot_name_keywords": ["keywords from your bot's display name"]}
+```
 
-- `systemd/tg-listener.service`: `Restart=always` + `RestartSec=3`, so a `kill -9` is healed within 3 seconds (verified); `listener.lock` guarantees a single instance, and a `listener.stop` file suppresses startup (maintenance switch).
-- `systemd/install.sh`: installs the unit under `/etc/systemd/system/` and runs `daemon-reload` + `enable` + `restart`. It also snapshots the current environment's egress proxy variables into `systemd/egress.env` (mode 600), which the unit reads as its `EnvironmentFile` for network access — **that file carries runtime proxy credentials, stays on your machine, and must never be committed**; `install.sh` itself only generates it from the current environment, so it is safe to commit.
-- A VM/runtime replacement wipes the unit under `/etc/systemd/system/` (and rotates the proxy credentials), so the listener stops until the liveness hook or the hourly backstop task notices the stale heartbeat and re-runs `install.sh` to restore hosting (a detached start is only the last resort). Verified over 24 hours (2026-11-12 20:06 to 2026-11-13 20:17): 13 VM replacements, zero systemd self-deaths, zero lost messages; Telegram hook input tokens fell from ~25.8M on the pilot day to ~11.6M (−55%).
+Optional access control:
+
+- `"owner_ids": [your Telegram user id]`: only your DMs count as relevant; private messages from anyone else are dropped silently (no 👀 reaction, no queue entry; they are logged to a local dropped.log for later review).
+- `"group_ids": [chat id]`: only listed groups are watched and other groups' messages are dropped silently; the event of the bot being added to a new group is never dropped, so the watch still notices and can learn the new group's id. Without it, every group the bot belongs to counts.
+
+Behavior you will see once it runs: each relevant message gets a 👀 reaction the moment it is pulled (a read receipt); while a reply is plausible, a "typing..." indicator is kept alive until the message is handled; and if one message stays unhandled for about five minutes (the classic case is the agent being frozen on an approval prompt in the host app), a watchdog posts one hint into the chat by itself.
+
+**5.2 Pick one run mode (the resident mode is recommended)**
+
+- **Resident mode (recommended)**: `listener.py` is a zero-LLM long-polling daemon that pulls updates, queues them, and keeps a heartbeat (`listener-state.json`) fresh by itself. Pair it with an infrequent hook or scheduled task that wakes an agent to reply to unhandled queue records, and restores the daemon per the hosting notes below when the heartbeat goes stale. The behavioral rules (when to speak, how many rounds of disagreement, when to escalate to you) live in that task's instructions; adjust them to taste.
+  - **Host it under systemd** (files in `systemd/`): a daemon launched from agent turns does not live long (a detached process lived about 7 minutes at the median in our runs), and every death costs an agent wake-up. `tg-listener.service` uses `Restart=always` so a killed process is back within 3 seconds (verified); `install.sh` installs the unit under `/etc/systemd/system/` and enables it, and snapshots the current environment's egress proxy variables into `systemd/egress.env` for the service to reach the network — **that file carries runtime proxy credentials, stays on your machine, and must never be committed** (`install.sh` itself only generates it, so it is safe to commit). Note: a VM/runtime replacement wipes the unit and rotates the proxy credentials, so after a replacement the heartbeat watcher or a backstop task must re-run `install.sh` to restore hosting; a detached start is only the last resort. In 24 hours of production use with multiple VM replacements, systemd-hosted instances never died on their own and no messages were lost; Telegram keeps unconfirmed updates for about 24 hours, so short outages miss nothing.
+- **Slice mode (legacy alternative)**: `watch.py` long-polls in 600-second slices inside agent turns, handing over seamlessly via a file lock; the task template is `relay/watch-task.md`. It needs no resident process, but every slice occupies an agent turn. Pick one mode; do not mix them.
 
 ## What it does
 
 - Calls the Telegram Bot API as your own bot: identity (getMe), new messages (getUpdates), sending (sendMessage, with replies and forum topics), chat info (getChat), plus the webhook trio (setWebhook / getWebhookInfo / deleteWebhook)
 - The bot token lives only in Muse's vault. Scripts use it through the runtime credential swap, so the token never appears in code, docs, or logs
-- Ships a message watch: new updates land in a local queue file with a persistent offset watermark, ready to pair with a scheduled watch task
+- Ships a message watch: new updates land in a local queue file with a persistent offset watermark, paired with a hook or scheduled task
 
 ## Repository layout
 
@@ -79,20 +88,20 @@ connector/
   CONNECTOR.md          Operating doc (your Muse reads it when calling the API)
   bin/tg.py             Bot API command-line helper
 relay/
-  fetch.py              getUpdates queue script (offset watermark + relevance pre-filter + 👀 read reactions)
-  watch.py              Long-poll watch slice (600s slices, file lock + --wait-lock seamless handover)
+  fetch.py              getUpdates queue script (offset watermark + relevance pre-filter + 👀 read reactions), shared by listener and watch
+  listener.py           Zero-LLM resident long-poll daemon (recommended mode, heartbeat + external recovery)
+  watch.py              Long-poll watch slice (legacy alternative, 600s slices, file-lock handover)
   typing_keeper.py      Tiny keeper that holds a "typing..." indicator until a message is handled
   stuck_watchdog.py     Per-message stuck watchdog: posts one hint in the chat when handling stalls
-  listener.py           Zero-LLM resident long-poll daemon (optional mode, heartbeat + external revival)
-  watch-task.md         Instruction template for the message-watch scheduled task (supervisor + short watcher)
+  watch-task.md         Instruction template for the slice-mode watch task
 systemd/
   tg-listener.service   systemd unit for hosting the listener (Restart=always, heals in 3s)
-  install.sh            Reinstall script (refreshes egress.env + installs the unit + restarts the service)
+  install.sh            Hosting install/recovery script (refreshes egress.env + installs the unit + restarts the service)
 ```
 
 ## Known limitations
 
-- Listening is long-poll based. Replying can only happen inside Muse agent turns, so bot replies are minutes late, never instant. Pulling has two modes: watch.py slices run inside agent turns; a listener.py resident process, once launched from an agent turn, keeps pulling by itself (credentials are swapped per request and never resident in the process), but it does not survive VM/runtime replacements and needs a hook or scheduled task watching its heartbeat to revive it; the `systemd/` hosting in Step 5 is recommended, as it narrows deaths down to VM replacements themselves.
+- Listening is long-poll based. Replying can only happen inside Muse agent turns, so bot replies are minutes late, never instant. The recommended setup is the resident listener under systemd: credentials are swapped per request and never resident in the process, deaths narrow down to VM/runtime replacements, and those recover automatically.
 - The webhook commands are included, but they need a public HTTPS endpoint that Telegram can reach, and something still has to wake the agent after delivery. Whether that trade is worth it depends on your setup.
 - A bot only sees chats it has joined. Telegram keeps unconfirmed updates for about 24 hours, so a watch that is down longer than that will miss messages.
 
